@@ -1,6 +1,6 @@
 # Android Recovery 移植方法论 —— 三台设备实战沉淀
 
-> 基于三台真机：Xiaomi Mi 10（lmi, A-only）、OnePlus 7T Pro（hotdog, A/B）、
+> 基于真机：Redmi K30 Pro（lmi, A-only）、OnePlus 7T Pro（hotdog, A/B）、
 > 以及 lmi 上他人 0.1.2 镜像的逆向。目标：任何新设备 1~2 小时内跑通 Skyward（或同类 Rust recovery）。
 
 ---

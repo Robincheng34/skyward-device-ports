@@ -8,7 +8,7 @@ Two devices are fully documented, both verified on real hardware:
 
 | Device | Codename | Slot | Base | Result |
 |---|---|---|---|---|
-| Xiaomi POCO F2 Pro / Mi 10 Turbo | `lmi` | A-only | others' TWRP-style image (fuzhi kernel) | fully running: mounts, mount page, MTP, raw `/data` backup |
+| Xiaomi Redmi K30 Pro | `lmi` | A-only | others' TWRP-style image (fuzhi kernel) | fully running: mounts, mount page, MTP, raw `/data` backup |
 | OnePlus 7T Pro | `hotdog` | A/B | LineageOS recovery + OEM kernel | fully running incl. touch |
 
 Nothing in this repository is a flashable image: everything here is method,
