@@ -1,0 +1,53 @@
+# OnePlus 7T Pro (hotdog, HD1910), from `skyward detect` facts and the
+# phone's own table; the first version for `fastboot boot` to try.
+
+[device]
+codename = "OnePlus7TPro"
+brand = "OnePlus"
+model = "HD1910"
+ab = true
+
+[display]
+width = 1440
+height = 3120
+density = 560
+
+[partitions]
+mounted = ["persist", "dsp"]
+
+# The baseband's image partition, which the trusted world's loaders look in
+# for their apps; the key service does not start without it.
+[firmware]
+partition = "modem"
+
+# The phone's own trusted-world channel and its key and credential services,
+# as its vendor keeps them. The key service is of the older kind here, so
+# the data partition is not expected to open.
+# The phone's own directory for hardware services of the older kind, from
+# the installed system; the key and credential services register with it.
+[[service]]
+path = "/mnt/system/system/bin/hwservicemanager"
+user = "root"
+groups = ["root"]
+libraries = ["/mnt/system/system/lib64", "/vendor/lib64", "/odm/lib64", "/system/lib64"]
+
+[[service]]
+path = "/vendor/bin/qseecomd"
+user = "root"
+groups = ["root"]
+libraries = ["/mnt/system/system/lib64", "/vendor/lib64", "/odm/lib64", "/system/lib64"]
+
+[[service]]
+path = "/vendor/bin/hw/android.hardware.keymaster@4.0-service-qti"
+user = "root"
+groups = ["root", "system"]
+libraries = ["/mnt/system/system/lib64", "/vendor/lib64", "/odm/lib64", "/system/lib64"]
+
+[[service]]
+path = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti"
+user = "root"
+groups = ["root", "system"]
+libraries = ["/mnt/system/system/lib64", "/vendor/lib64", "/odm/lib64", "/system/lib64"]
+
+[backup]
+efs = ["modemst1", "modemst2"]
