@@ -8,7 +8,7 @@ Two devices are fully documented, both verified on real hardware:
 
 | Device | Codename | Slot | Base | Result |
 |---|---|---|---|---|
-| Xiaomi Redmi K30 Pro | `lmi` | A-only | TWRP 3.7.1 ramdisk (sekaiacg) + fuzhi MIUI-era kernel | fully running: mounts, mount page, MTP, raw `/data` backup |
+| Xiaomi Redmi K30 Pro | `lmi` | A-only | TWRP 3.7.1 ramdisk (sekaiacg) + MIUI 官方 ROM 内核 | fully running: mounts, mount page, MTP, raw `/data` backup |
 | OnePlus 7T Pro | `hotdog` | A/B | LineageOS recovery ramdisk + OxygenOS 11 stock kernel | fully running incl. touch |
 
 ## Why the lmi base is TWRP-line, not LineageOS
@@ -20,7 +20,7 @@ from one consistent world. Tested on the real phone:
 |---|---|
 | MIUI stock | boots (the phone's daily ROM), recovery ramdisk is MIUI's own |
 | LineageOS official kernel + dtbo + stock recovery ramdisk | **panics before init** — our first attempt, documented in `lmi/RE-DIFF-1.2-vs-mine.md` |
-| TWRP 3.7.1 (sekaiacg build, fuzhi 4.19.325 kernel) | boots — **chosen as the base** |
+| TWRP 3.7.1 (sekaiacg build, MIUI 官方 ROM 内核) | boots — **chosen as the base** |
 
 The published image keeps that TWRP-line kernel/dtbo/ramdisk and only replaces
 the recovery program with patched Skyward 0.2.0. The recovery partition is
