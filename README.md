@@ -1,80 +1,78 @@
 # skyward-device-ports
 
-Porting notes, build pipelines and patches for running
-[Skyward](https://github.com/kirklin/skyward) (a Rust-based Android recovery) on devices
-the upstream does not target.
+为 [Skyward](https://github.com/kirklin/skyward)（一个 Rust 编写的 Android recovery）
+适配上游未支持设备的移植笔记、构建管线与补丁。
 
-Two devices are fully documented, both verified on real hardware:
+两台设备已完成完整适配，均经真机验证：
 
-| Device | Codename | Slot | Base | Result |
+| 设备 | 代号 | 槽位 | 底座 | 结果 |
 |---|---|---|---|---|
-| Xiaomi Redmi K30 Pro | `lmi` | A-only | TWRP 3.7.1 ramdisk (sekaiacg) + MIUI 官方 ROM 内核 | fully running: mounts, mount page, MTP, raw `/data` backup |
-| OnePlus 7T Pro | `hotdog` | A/B | LineageOS recovery ramdisk + OxygenOS 11 stock kernel | fully running incl. touch |
+| 小米 Redmi K30 Pro | `lmi` | A-only | TWRP 3.7.1 ramdisk（sekaiacg）+ MIUI 官方 ROM 内核 | 完整运行：分区挂载、挂载页、MTP、整块 /data 备份 |
+| 一加 7T Pro | `hotdog` | A/B | LineageOS recovery ramdisk + OxygenOS 11 原厂内核 | 完整运行（含触控） |
 
-## Why the lmi base is TWRP-line, not LineageOS
+## 为什么 lmi 的底座是 TWRP 线，而不是 LineageOS
 
-The K30 Pro is a MIUI-era device, and the kernel↔dtbo↔ramdisk trio must come
-from one consistent world. Tested on the real phone:
+K30 Pro 是 MIUI 时代机型，内核↔dtbo↔ramdisk 三件套必须来自同一个世界。
+真机实测结论：
 
-| Base line | Outcome |
+| 底座来源 | 实测结果 |
 |---|---|
-| MIUI stock | boots (the phone's daily ROM), recovery ramdisk is MIUI's own |
-| LineageOS official kernel + dtbo + stock recovery ramdisk | **panics before init** — our first attempt, documented in `lmi/RE-DIFF-1.2-vs-mine.md` |
-| TWRP 3.7.1 (sekaiacg build, MIUI 官方 ROM 内核) | boots — **chosen as the base** |
+| MIUI 原厂 | 可启动（手机日常 ROM），但其 recovery ramdisk 是 MIUI 自己的 |
+| LineageOS 官方内核 + dtbo + stock recovery ramdisk | **init 前 panic**——我们的第一次尝试，过程见 `lmi/RE-DIFF-1.2-vs-mine.md` |
+| TWRP 3.7.1（sekaiacg 构建，MIUI 官方 ROM 内核） | 可启动——**选为底座** |
 
-The published image keeps that TWRP-line kernel/dtbo/ramdisk and only replaces
-the recovery program with patched Skyward 0.2.0. The recovery partition is
-independent of the ROM you run, so the phone stays on MIUI or LineageOS as-is.
-The same TWRP base also fails to decrypt /data in recovery (QTI TEE wall,
-`lmi/DECRYPT-FINDINGS.md`), which is why the image ships whole-block encrypted
-`/data` backup instead.
+发布的镜像保留了 TWRP 线的内核/dtbo/ramdisk，只把 recovery 程序替换为
+打补丁的 Skyward 0.2.0。recovery 分区与你刷的 ROM 相互独立，手机继续用
+MIUI 或 LineageOS 均不受影响。同一 TWRP 底座在 recovery 下也无法解密
+/data（QTI TEE 的墙，见 `lmi/DECRYPT-FINDINGS.md`），因此镜像提供的是
+整块加密态 /data 备份。
 
-**Prebuilt images** are on the
-[Releases page](https://github.com/Robincheng34/skyward-device-ports/releases):
+## 仓库里没有可刷镜像
+
+本仓库所有内容都是方法、脚本、补丁与配置——供你为自己的设备重建。
+
+**成品镜像**在 [Releases 页面](https://github.com/Robincheng34/skyward-device-ports/releases)：
 [`v0.2.0-lmi`](https://github.com/Robincheng34/skyward-device-ports/releases/tag/v0.2.0-lmi) ·
-[`v0.2.0-hotdog`](https://github.com/Robincheng34/skyward-device-ports/releases/tag/v0.2.0-hotdog).
-Kernels and ramdisk bases inside them are third-party GPL builds — see the
-release notes for attribution, and check your device's recovery partition size
-before flashing.
+[`v0.2.0-hotdog`](https://github.com/Robincheng34/skyward-device-ports/releases/tag/v0.2.0-hotdog)。
+镜像内的内核与 ramdisk 底座均为第三方 GPL 构建——署名见 Release 说明；
+刷入前请确认你设备 recovery 分区的大小。
 
-## Layout
+## 目录结构
 
 ```
-METHODOLOGY.md                 the full playbook, start here
-lmi/                           the A-only story
-  RE-DIFF-1.2-vs-mine.md       reverse-engineering two images to find why one boots
-  A-ONLY-PORT.md               removing the A/B assumption from the boot path
-  DECRYPT-FINDINGS.md          why FBE decryption cannot work here (TEE), evidence chain
-  rebuild_final.py             repack: swap ramdisk, recomputed AVB hash footer
-  patch_cmdline.py             edit boot cmdline, reseal AVB
-  extract_ramdisks.py          LZ4-legacy + gzip ramdisk unpacker (pure Python)
-  parse_cpio_only.py           newc cpio parser
-  compare_imgs.py              boot image comparison
-  device_lmi_020.toml          device config tuned on the phone
-hotdog/                        the A/B story
-  HOTDOG-PORT.md               nine pitfalls, from ABL quirks to touch layers
-  build_hotdog.py              ten-flag build pipeline with single-variable isolation
-  lzc.py                       LZ4 legacy frame compressor with round-trip selftest
-  device.toml                  device config tuned on the phone
-patches/patched-src/           patched source files (GPLv3, see below)
+METHODOLOGY.md                 完整方法论，从这里开始读
+lmi/                           A-only 的故事
+  RE-DIFF-1.2-vs-mine.md       逆向两份镜像，找出为何一份能启动
+  A-ONLY-PORT.md               从启动路径中移除 A/B 假设
+  DECRYPT-FINDINGS.md          为什么 FBE 解密在此设备上不可能（TEE），完整证据链
+  rebuild_final.py             重打包：替换 ramdisk、重算 AVB 哈希 footer
+  patch_cmdline.py             修改 boot cmdline、重封 AVB
+  extract_ramdisks.py          LZ4-legacy + gzip ramdisk 解包器（纯 Python）
+  parse_cpio_only.py           newc cpio 解析器
+  compare_imgs.py              boot 镜像对比
+  device_lmi_020.toml          真机调校的设备配置
+hotdog/                        A/B 的故事
+  HOTDOG-PORT.md               九个坑：从 ABL 脾气到触控三层
+  build_hotdog.py              十开关构建管线，支持单变量对照
+  lzc.py                       LZ4 legacy 帧压缩器（带往返自检）
+  device.toml                  真机调校的设备配置
+patches/patched-src/           补丁后的源码文件（GPLv3，见下）
 ```
 
-## The patches, in short
+## 补丁摘要
 
-All against skyward 0.2.0:
+全部基于 skyward 0.2.0：
 
-- `main.rs` — slot-optional boot path (`prepare_a_only`), tolerant firmware
-  fallback, optional bring-up of the mount list
-- `skyward-vab/partitions.rs` — slotless super mapping
-  (`mount_partitions_slotless`), slotless mount/unmount for the mount page
-- `skyward-info/lib.rs` — property sources without a slot
-- `ui.rs` — panel node on the first device-tree level, backlight fallback for
-  panels without a normal-maximum calibration
-- `input.rs` — touch panels that report `INPUT_PROP_POINTER` without
-  `INPUT_PROP_DIRECT` (OnePlus) are still selected
+- `main.rs`——槽位可选的启动路径（`prepare_a_only`）、固件回退容错、
+  `mounted` 分区列表尽力而为
+- `skyward-vab/partitions.rs`——无槽位的 super 映射
+  （`mount_partitions_slotless`）、挂载页的无槽位挂载/卸载
+- `skyward-info/lib.rs`——无槽位时的属性来源
+- `ui.rs`——面板节点在设备树第一层的查找、无亮度标定面板的回退
+- `input.rs`——只报 `INPUT_PROP_POINTER` 不报 `INPUT_PROP_DIRECT`
+  的触摸面板（一加）也能被选中
 
-## Licence
+## 许可
 
-Skyward is GPLv3; these patches follow it. The two `device.toml` files and the
-documentation are factual notes, use freely. No kernel, firmware or font
-binaries are included — bring your own base image.
+Skyward 为 GPLv3，这些补丁遵循同一许可。两份 `device.toml` 与文档是事实
+记录，随意使用。仓库不含任何内核、固件或字体二进制——底座镜像请自备。

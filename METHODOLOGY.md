@@ -130,10 +130,10 @@ hwservicemanager（A/B 机器，从 /mnt/system/system/bin 取）
 
 | 资产 | 位置 |
 |---|---|
-| A-only 补丁源码（5 文件） | `skyward-lmi-port/patched-src/` |
-| lmi 打包器 + AVB 重封 | `skyward-lmi-port/rebuild_final.py`、`patch_cmdline.py` |
-| hotdog 打包器（十开关） | `skyward-hotdog/build_hotdog.py` |
-| LZ4 legacy 压缩器 | `skyward-hotdog/lzc.py` |
-| cpio/LZ4 解析 | `skyward-lmi-port/extract_ramdisks.py`、`parse_cpio_only.py` |
-| 解密证据链 | `skyward-lmi-port/DECRYPT-FINDINGS.md` |
-| 本文档 | `skyward-hotdog/METHODOLOGY.md` |
+| A-only 补丁源码（6 文件） | `patches/patched-src/` |
+| lmi 打包器 + AVB 重封 | `lmi/rebuild_final.py`、`lmi/patch_cmdline.py` |
+| hotdog 打包器（十开关） | `hotdog/build_hotdog.py` |
+| LZ4 legacy 压缩器 | `hotdog/lzc.py` |
+| cpio/LZ4 解析 | `lmi/extract_ramdisks.py`、`lmi/parse_cpio_only.py` |
+| 解密证据链 | `lmi/DECRYPT-FINDINGS.md` |
+| 成品镜像 | GitHub Releases 页面 |
