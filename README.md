@@ -14,6 +14,14 @@ Two devices are fully documented, both verified on real hardware:
 Nothing in this repository is a flashable image: everything here is method,
 scripts, patches and configuration, so you can rebuild for your own device.
 
+**Prebuilt images** are on the
+[Releases page](https://github.com/Robincheng34/skyward-device-ports/releases):
+[`v0.2.0-lmi`](https://github.com/Robincheng34/skyward-device-ports/releases/tag/v0.2.0-lmi) ·
+[`v0.2.0-hotdog`](https://github.com/Robincheng34/skyward-device-ports/releases/tag/v0.2.0-hotdog).
+Kernels and ramdisk bases inside them are third-party GPL builds — see the
+release notes for attribution, and check your device's recovery partition size
+before flashing.
+
 ## Layout
 
 ```
