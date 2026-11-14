@@ -8,11 +8,26 @@ Two devices are fully documented, both verified on real hardware:
 
 | Device | Codename | Slot | Base | Result |
 |---|---|---|---|---|
-| Xiaomi Redmi K30 Pro | `lmi` | A-only | others' TWRP-style image (fuzhi kernel) | fully running: mounts, mount page, MTP, raw `/data` backup |
-| OnePlus 7T Pro | `hotdog` | A/B | LineageOS recovery + OEM kernel | fully running incl. touch |
+| Xiaomi Redmi K30 Pro | `lmi` | A-only | TWRP 3.7.1 ramdisk (sekaiacg) + fuzhi MIUI-era kernel | fully running: mounts, mount page, MTP, raw `/data` backup |
+| OnePlus 7T Pro | `hotdog` | A/B | LineageOS recovery ramdisk + OxygenOS 11 stock kernel | fully running incl. touch |
 
-Nothing in this repository is a flashable image: everything here is method,
-scripts, patches and configuration, so you can rebuild for your own device.
+## Why the lmi base is TWRP-line, not LineageOS
+
+The K30 Pro is a MIUI-era device, and the kernel↔dtbo↔ramdisk trio must come
+from one consistent world. Tested on the real phone:
+
+| Base line | Outcome |
+|---|---|
+| MIUI stock | boots (the phone's daily ROM), recovery ramdisk is MIUI's own |
+| LineageOS official kernel + dtbo + stock recovery ramdisk | **panics before init** — our first attempt, documented in `lmi/RE-DIFF-1.2-vs-mine.md` |
+| TWRP 3.7.1 (sekaiacg build, fuzhi 4.19.325 kernel) | boots — **chosen as the base** |
+
+The published image keeps that TWRP-line kernel/dtbo/ramdisk and only replaces
+the recovery program with patched Skyward 0.2.0. The recovery partition is
+independent of the ROM you run, so the phone stays on MIUI or LineageOS as-is.
+The same TWRP base also fails to decrypt /data in recovery (QTI TEE wall,
+`lmi/DECRYPT-FINDINGS.md`), which is why the image ships whole-block encrypted
+`/data` backup instead.
 
 **Prebuilt images** are on the
 [Releases page](https://github.com/Robincheng34/skyward-device-ports/releases):
