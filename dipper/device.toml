@@ -1,0 +1,23 @@
+# 小米 8（dipper, MI 8）设备配置初版
+# 关键事实：A-only 且无 super —— system/vendor 是物理分区；
+# recovery 分区 64MiB；FBE(fileencryption=ice) 无 metadata 加密；
+# keymaster 3.0/4.0 HIDL + gatekeeper 1.0（无 KeyMint AIDL）。
+
+[device]
+codename = "dipper"
+brand = "Xiaomi"
+model = "MI 8"
+ab = false
+
+[display]
+width = 1080
+height = 2248
+density = 402
+
+# 物理分区直接挂（无 super），persist/dsp/bluetooth/firmware 走 fstab。
+[partitions]
+mounted = ["persist", "dsp"]
+
+# EFS：小米 8 的基带/NV 分区。
+[backup]
+efs = ["modemst1", "modemst2", "fsg"]

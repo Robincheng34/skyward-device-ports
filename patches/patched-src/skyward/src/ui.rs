@@ -155,13 +155,26 @@ fn normal_max(max: u32) -> Result<u32> {
     // without the colon either.
     let (name, _) = boot.trim().split_once(':').with_context(|| format!("{param} names no panel: {boot:?}"))?;
     let soc = Path::new("/proc/device-tree/soc");
-    let node = fs::read_dir(soc)
-        .with_context(|| format!("read {}", soc.display()))?
-        .map(|e| e.map(|e| e.path().join(name)))
-        .collect::<std::io::Result<Vec<_>>>()?
-        .into_iter()
-        .find(|p| p.is_dir())
-        .ok_or_else(|| anyhow!("panel {name} is not in the device tree"))?;
+    // The panel's node sits straight under the top of the tree on some
+    // phones, and one step below it on others; take whichever holds it.
+    let own = soc.join(name);
+    let node = if own.is_dir() {
+        Some(own)
+    } else {
+        fs::read_dir(soc)
+            .with_context(|| format!("read {}", soc.display()))?
+            .map(|e| e.map(|e| e.path().join(name)))
+            .collect::<std::io::Result<Vec<_>>>()?
+            .into_iter()
+            .find(|p| p.is_dir())
+    };
+    // Some drivers (e.g. the Mi 8's) name their panel in the DRM parameter
+    // but keep no node of that name in the device tree — the display node
+    // points at the panel through a phandle. There is no calibration to be
+    // read there, so use the backlight's own range.
+    let Some(node) = node else {
+        return Ok(max);
+    };
     let cell = |prop: &str| -> Result<u32> {
         let path = node.join(prop);
         let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
@@ -170,19 +183,13 @@ fn normal_max(max: u32) -> Result<u32> {
     };
     let chosen = NORMAL_MAX.iter().find(|(normal, _)| node.join(normal).exists()).copied();
     let (normal, full) = match chosen {
-        Some(pair) => pair,
-        None => {
-            // Older panels (as lmi's qcom,mdss_dsi_j11_38_08_0a_fhd_cmd) give
-            // only the backlight's own full range: use it as the normal
-            // maximum too, so brightness maps straight to the raw level.
-            ensure!(
-                node.join("qcom,mdss-dsi-bl-max-level").exists(),
-                "panel {name} gives its normal maximum as none of {NORMAL_MAX:?}"
-            );
-            ("qcom,mdss-dsi-bl-max-level", "qcom,mdss-dsi-bl-max-level")
-        }
+        Some(pair) => (cell(pair.0)?, cell(pair.1)?),
+        // A panel that gives none of these — as the 7T Pro's, whose table
+        // says nothing of the backlight at all — runs the whole of its
+        // range at normal light, and brightness maps straight to the raw
+        // level.
+        None => return Ok(max),
     };
-    let (normal, full) = (cell(normal)?, cell(full)?);
     ensure!(normal > 0 && normal <= full, "panel {name}: normal maximum {normal} out of {full}");
     Ok((f64::from(max) * f64::from(normal) / f64::from(full)).round() as u32)
 }
@@ -914,15 +921,27 @@ fn read_folder(path: &Path) -> Result<Vec<FileRow>> {
 /// are started again from there whenever they end.
 fn read_mounts(services: &[Service]) -> Result<Vec<skyward_ui::app::MountRow>> {
     use skyward_ui::app::MountRow;
-    let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
-    let shown = skyward_vab::mounted_partitions(slot)?;
+    let slot = skyward_vab::current_slot()?;
+    let (bases, shown, suffix, props) = match slot {
+        Some(slot) => (
+            skyward_vab::slot_bases(slot)?,
+            skyward_vab::mounted_partitions(slot)?,
+            slot.suffix().to_string(),
+            skyward_info::installed_props(slot)?,
+        ),
+        None => (
+            skyward_vab::slotless_bases()?,
+            skyward_vab::mounted_partitions_slotless()?,
+            String::new(),
+            skyward_info::installed_props_a_only()?,
+        ),
+    };
     let holders = skyward_block::mount::holders()?;
-    let props = skyward_info::installed_props(slot)?;
     let services: Vec<&Service> = services.iter().filter(|s| s.runs_on(&props)).collect();
     let mut rows = Vec::new();
-    for base in skyward_vab::slot_bases(slot)? {
+    for base in bases {
         let point = skyward_vab::mount_point(&base);
-        let name = format!("{base}{}", slot.suffix());
+        let name = format!("{base}{suffix}");
         let mounted = shown.iter().find(|m| m.partition == name);
         let mut using = BTreeSet::new();
         if let Some(m) = mounted {
@@ -2569,15 +2588,23 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     // A partition that will not mount, or is in use, is the
                     // page's to report; the recovery carries on.
                     Effect::Mount(base) => {
-                        let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
-                        if let Err(e) = skyward_vab::mount_one(slot, &base) {
+                        let slot = skyward_vab::current_slot()?;
+                        let outcome = match slot {
+                            Some(slot) => skyward_vab::mount_one(slot, &base),
+                            None => skyward_vab::mount_one_slotless(&base),
+                        };
+                        if let Err(e) = outcome {
                             app.mount_failed(MountFailure { mounting: true, base, detail: format!("{e:#}") });
                         }
                         app.set_mounts(mounts());
                     }
                     Effect::Unmount(base) => {
-                        let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
-                        if let Err(e) = skyward_vab::unmount_one(slot, &base) {
+                        let slot = skyward_vab::current_slot()?;
+                        let outcome = match slot {
+                            Some(slot) => skyward_vab::unmount_one(slot, &base),
+                            None => skyward_vab::unmount_one_slotless(&base),
+                        };
+                        if let Err(e) = outcome {
                             app.mount_failed(MountFailure { mounting: false, base, detail: format!("{e:#}") });
                         }
                         app.set_mounts(mounts());

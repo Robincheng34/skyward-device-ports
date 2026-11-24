@@ -3,12 +3,13 @@
 为 [Skyward](https://github.com/kirklin/skyward)（一个 Rust 编写的 Android recovery）
 适配上游未支持设备的移植笔记、构建管线与补丁。
 
-两台设备已完成完整适配，均经真机验证：
+三台设备已完成完整适配，均经真机验证：
 
 | 设备 | 代号 | 槽位 | 底座 | 结果 |
 |---|---|---|---|---|
 | 小米 Redmi K30 Pro | `lmi` | A-only | TWRP 3.7.1 ramdisk（sekaiacg）+ MIUI 官方 ROM 内核 | 完整运行：分区挂载、挂载页、MTP、整块 /data 备份 |
 | 一加 7T Pro | `hotdog` | A/B | LineageOS recovery ramdisk + OxygenOS 11 原厂内核 | 完整运行（含触控） |
+| 小米 8 | `dipper` | A-only（纯物理分区） | LineageOS recovery ramdisk（自提 fstab） | 完整运行（MTP 待修） |
 
 ## 为什么 lmi 的底座是 TWRP 线，而不是 LineageOS
 
@@ -56,6 +57,11 @@ hotdog/                        A/B 的故事
   build_hotdog.py              十开关构建管线，支持单变量对照
   lzc.py                       LZ4 legacy 帧压缩器（带往返自检）
   device.toml                  真机调校的设备配置
+dipper/                        纯物理分区 A-only 的故事
+  DIPPER-PORT.md               九个坑：DRM panic、fstab、面板、s2idle
+  build_dipper.py              构建器（含 fstab/MTP 补丁）
+  device.toml / fstab.qcom     dipper 设备配置与分区表
+  patch_drm.py                 drm 0.15 crtc_id=0 panic 的本地补丁
 patches/patched-src/           补丁后的源码文件（GPLv3，见下）
 ```
 

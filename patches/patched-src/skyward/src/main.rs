@@ -57,6 +57,12 @@ enum Cmd {
         #[arg(long)]
         config: String,
     },
+    /// Work out what this phone is and write a device configuration for it.
+    Detect {
+        /// Where the configuration is written.
+        #[arg(long, default_value = "/skyward/device.generated.toml")]
+        out: String,
+    },
     /// Print the suffix of the slot the phone runs from and, where the
     /// phone's boot control runs, what it holds of each slot.
     Slot,
@@ -225,6 +231,7 @@ fn main() -> Result<()> {
     }
     match Cli::parse().cmd {
         Cmd::Info { config } => info(&config),
+        Cmd::Detect { out } => detect(&out),
         Cmd::Slot => slot(),
         Cmd::Modules { source } => modules(&source),
         Cmd::Load { config, names } => {
@@ -504,8 +511,12 @@ fn bring_up(cfg: &DeviceConfig, slot: Option<skyward_vab::Slot>) -> Result<()> {
     let services: Vec<_> = cfg.services.iter().filter(|s| s.runs_on(&props)).cloned().collect();
     // The drivers ask for their firmware by name, and the kernel looks only
     // in folders of its own unless told to pass on what it does not find
-    // there to ueventd, which looks in the recovery's firmware folders.
-    std::fs::write(FIRMWARE_FALLBACK, "1").with_context(|| format!("write 1 to {FIRMWARE_FALLBACK}"))?;
+    // there to ueventd, which looks in the recovery's firmware folders. An
+    // older kernel takes no such telling and looks nowhere else, which is
+    // nothing to stop the rest for.
+    if let Err(e) = std::fs::write(FIRMWARE_FALLBACK, "1") {
+        skyward_sys::kmsg(&format!("firmware fallback: {e:#}"))?;
+    }
     if let Some(firmware) = &cfg.firmware {
         mount_firmware(&firmware.partition)?;
     }
@@ -680,6 +691,15 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>) ->
 /// once, so that any reboot from here boots the system. Failures go to the
 /// kernel log and still end the process, which init then starts again.
 fn recovery() -> Result<()> {
+    // A panic in the UI thread aborts the process without a "recovery failed"
+    // line, since only the expected errors are written to the kernel log.
+    // Keep the panic's own words there too, in the pieces the kernel keeps.
+    std::panic::set_hook(Box::new(|info| {
+        let said = info.to_string();
+        for piece in said.as_bytes().chunks(360) {
+            let _ = skyward_sys::kmsg(&format!("skyward panic: {}", String::from_utf8_lossy(piece)));
+        }
+    }));
     use std::os::unix::fs::PermissionsExt;
     let run = || -> Result<()> {
         // Open to the programs the recovery runs as other users, the
@@ -800,22 +820,178 @@ fn prepare(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
 /// what runs, with the properties read from what did mount.
 #[cfg(target_os = "android")]
 fn prepare_a_only(cfg: &DeviceConfig) -> Result<()> {
-    match skyward_vab::mount_partitions_slotless() {
-        Ok(mounts) => {
-            for d in &mounts.damaged {
-                skyward_sys::kmsg(&format!("super: {d}"))?;
+    // Two kinds of A-only phone exist: those whose system is a set of logical
+    // partitions inside super (lmi), and those whose system partitions are
+    // plain partitions on the GPT (dipper). Take the path the phone has.
+    let super_dev = std::path::Path::new("/dev/block/by-name/super");
+    if super_dev.exists() {
+        match skyward_vab::mount_partitions_slotless() {
+            Ok(mounts) => {
+                for d in &mounts.damaged {
+                    skyward_sys::kmsg(&format!("super: {d}"))?;
+                }
+                for m in &mounts.partitions {
+                    skyward_sys::kmsg(&format!("mounted {} on {} ({})", m.partition, m.mount_point.display(), m.filesystem))?;
+                }
             }
-            for m in &mounts.partitions {
-                skyward_sys::kmsg(&format!("mounted {} on {} ({})", m.partition, m.mount_point.display(), m.filesystem))?;
+            Err(e) => skyward_sys::kmsg(&format!("partitions not mounted: {e:#}"))?,
+        }
+    } else {
+        // Plain GPT partitions: these phones' fstab names only the late
+        // mounts (persist, dsp, firmware), not system/vendor — those are
+        // mounted by the booted system itself. Mount them read-only from
+        // by-name so the installed system's props can be read, keeping them
+        // off /system and /vendor, which hold our own recovery programs.
+        skyward_sys::kmsg("no super: mounting physical partitions from by-name")?;
+        for name in ["system", "system_ext", "vendor", "product", "odm"] {
+            let device = std::path::Path::new("/dev/block/by-name").join(name);
+            if !device.exists() {
+                continue;
             }
-            // Without them the screen still shows and the keys still work,
-            // so this reason goes to the kernel log as well.
-            if let Err(e) = bring_up(cfg, None) {
-                skyward_sys::kmsg(&format!("devices not brought up: {e:#}"))?;
+            let target = std::path::Path::new("/mnt").join(name);
+            if let Err(e) = std::fs::create_dir_all(&target) {
+                skyward_sys::kmsg(&format!("create {}: {e:#}", target.display()))?;
+                continue;
+            }
+            match skyward_block::mount::mount_ro(&device, &target) {
+                Ok(fs) => skyward_sys::kmsg(&format!("mounted {name} on {} ({fs})", target.display()))?,
+                Err(e) => skyward_sys::kmsg(&format!("{name} not mounted: {e:#}"))?,
             }
         }
-        Err(e) => skyward_sys::kmsg(&format!("partitions not mounted: {e:#}"))?,
     }
+    // Without these the screen still shows and the keys still work, so the
+    // reason goes to the kernel log as well — on either path.
+    if let Err(e) = bring_up(cfg, None) {
+        skyward_sys::kmsg(&format!("devices not brought up: {e:#}"))?;
+    }
+    // What the key hardware answers about the disk key, in pieces short
+    // enough for the kernel to keep whole.
+    let said = skyward_crypto::keymint::probe();
+    for piece in said.as_bytes().chunks(380) {
+        skyward_sys::kmsg(&format!("key probe: {}", String::from_utf8_lossy(piece)))?;
+    }
+    // What this phone is, for a configuration to be written from: a phone
+    // met for the first time says so here, once it boots.
+    let (_, summary) = detect_report();
+    skyward_sys::kmsg(&summary)?;
+    Ok(())
+}
+
+/// The phone's own key and credential services, looked for among those its
+/// vendor keeps: the newest kind of each that is there.
+const KEYMINT_SERVICE: &str = "android.hardware.security.keymint-service";
+const KEYMASTER_SERVICE: &str = "android.hardware.keymaster@";
+const CREDENTIAL_SERVICE: &str = "android.hardware.gatekeeper";
+
+/// Partitions the phone's own programs and drivers use, tried in this
+/// order; what the phone does not have is left out.
+const MOUNTABLE: [&str; 8] = ["persist", "metadata", "dsp", "bluetooth", "modem", "modemst1", "modemst2", "efs"];
+
+/// What of the baseband's settings and the sensors' calibration a backup
+/// keeps, named as phones name them.
+const EFS_PARTITIONS: [&str; 9] = ["efs", "mdm1m9kefs1", "mdm1m9kefs2", "mdm1m9kefs3", "mdm1m9kefsc", "modemst1", "modemst2", "fsc", "fsg"];
+
+/// What this phone is, as a recovery can tell by looking: a configuration
+/// for it, and a line about it for the kernel log.
+fn detect_report() -> (String, String) {
+    use std::fmt::Write as _;
+    let props = skyward_info::installed_props_a_only().unwrap_or_default();
+    let said = |names: &[&str]| names.iter().find_map(|n| props.get(*n).cloned()).unwrap_or_else(|| "?".into());
+    let codename = said(&["ro.product.device", "ro.product.vendor.device", "ro.boot.hardware"]);
+    let brand = said(&["ro.product.brand", "ro.product.vendor.brand"]);
+    let model = said(&["ro.product.model", "ro.product.vendor.model"]);
+    let android = said(&["ro.build.version.release"]);
+    let patch = said(&["ro.build.version.security_patch"]);
+
+    // A phone booted from a slot has two of everything and names its
+    // partitions with a suffix; a phone without names them plainly and
+    // keeps its system in super all the same.
+    let ab = skyward_vab::current_slot().ok().flatten().is_some();
+
+    // What the phone has, by the links it gives them.
+    let parts = skyward_block::list_by_name(skyward_block::BY_NAME).unwrap_or_default();
+    let has = |name: &str| parts.iter().any(|p| p.name == name);
+    let mounted: Vec<&str> = MOUNTABLE.iter().copied().filter(|n| has(n)).collect();
+    let efs: Vec<&str> = EFS_PARTITIONS.iter().copied().filter(|n| has(n)).collect();
+
+    // The phone's own programs a recovery keeps running, as its vendor
+    // keeps them: the newest kind of the key service, and the credential
+    // service the lock screen's secret is asked of.
+    let mut keymint = None;
+    let mut keymaster = None;
+    let mut credential = None;
+    if let Ok(entries) = std::fs::read_dir("/vendor/bin/hw") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = entry.path().display().to_string();
+            if name.starts_with(KEYMINT_SERVICE) {
+                keymint = keymint.or(Some(path));
+            } else if name.starts_with(KEYMASTER_SERVICE) {
+                keymaster = keymaster.or(Some(path));
+            } else if name.starts_with(CREDENTIAL_SERVICE) {
+                credential = credential.or(Some(path));
+            }
+        }
+    }
+    let key = keymint.or(keymaster);
+
+    // What the data partition is encrypted with, as the phone's own table
+    // says it: that, and which kind the key service above is, decide
+    // whether a recovery can open it.
+    let fstab = ["qcom", "default", ""]
+        .iter()
+        .filter_map(|suffix| std::fs::read_to_string(format!("/vendor/etc/fstab{suffix}")).ok())
+        .find(|text| text.lines().any(|line| line.split_whitespace().nth(1) == Some("/data")));
+    let encryption = fstab
+        .as_deref()
+        .and_then(|text| text.lines().find(|line| line.split_whitespace().nth(1) == Some("/data")))
+        .and_then(|line| line.split_whitespace().nth(3))
+        .unwrap_or("?")
+        .to_string();
+
+    let mut text = String::new();
+    let _ = writeln!(text, "# Written on this phone by `skyward detect`: {brand} {model} ({codename}),");
+    let _ = writeln!(text, "# Android {android}, security patch {patch}. What cannot be told by looking");
+    let _ = writeln!(text, "# at a phone is left out; the docs say what the rest is for.");
+    let _ = writeln!(text);
+    let _ = writeln!(text, "[device]");
+    let _ = writeln!(text, "codename = {codename:?}");
+    let _ = writeln!(text, "brand = {brand:?}");
+    let _ = writeln!(text, "model = {model:?}");
+    let _ = writeln!(text, "ab = {ab}");
+    let _ = writeln!(text);
+    let _ = writeln!(text, "[partitions]");
+    let _ = writeln!(text, "mounted = [{}]", mounted.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(", "));
+    if Path::new("/vendor/bin/qseecomd").exists() {
+        let _ = writeln!(text, "\n[[service]]\npath = \"/vendor/bin/qseecomd\"\nuser = \"root\"\ngroups = [\"root\"]");
+    }
+    if let Some(path) = &key {
+        let _ = writeln!(text, "\n[[service]]\npath = {path:?}\nuser = \"root\"\ngroups = [\"root\", \"system\"]");
+    }
+    if let Some(path) = &credential {
+        let _ = writeln!(text, "\n[[service]]\npath = {path:?}\nuser = \"root\"\ngroups = [\"root\", \"system\"]");
+    }
+    let _ = writeln!(text, "\n[backup]\nefs = [{}]", efs.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(", "));
+    let _ = writeln!(text);
+    let _ = writeln!(text, "# The data partition is encrypted as its own table says: {encryption}");
+    let _ = writeln!(text, "# A recovery can open it only if the key service is the newer KeyMint and");
+    let _ = writeln!(text, "# the phone's trusted world lets it unwrap keys there; the key probe at");
+    let _ = writeln!(text, "# start-up says which it is, in the kernel log.");
+
+    let summary = format!(
+        "device detect: codename={codename} ab={ab} key={} credential={} mounted={mounted:?} efs={efs:?} data={encryption}",
+        key.as_deref().unwrap_or("none"),
+        credential.as_deref().unwrap_or("none")
+    );
+    (text, summary)
+}
+
+/// Write the configuration this phone asks for.
+fn detect(out: &str) -> Result<()> {
+    let (text, _) = detect_report();
+    std::fs::write(out, &text).with_context(|| format!("write {out}"))?;
+    println!("{text}");
+    println!("written to {out}");
     Ok(())
 }
 
