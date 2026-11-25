@@ -10,7 +10,8 @@ mod partitions;
 pub mod snapshots;
 
 pub use partitions::{
-    check_merge, map_slot, map_whole, mount_one, mount_partitions, mount_partitions_slotless, mount_point, mounted_partitions, release_partitions, slot_bases,
+    check_merge, map_slot, map_whole, mount_one, mount_one_slotless, mount_partitions, mount_partitions_slotless, mount_point,
+    mounted_partitions, mounted_partitions_slotless, release_partitions, slot_bases, slotless_bases, unmount_one_slotless,
     slot_sizes, snapshots_mapped, start_merge, unmap_slot, unmap_whole, unmount_one, unmount_partitions, Mounted, Mounts, SlotMaps,
     Whole,
 };
@@ -264,6 +265,13 @@ impl Update {
 }
 
 pub fn snapshot_state() -> Result<SnapshotState> {
+    // Only devices with dynamic partitions have snapshots to report. A
+    // plain-partition phone has no super and no ota snapshot at all, so
+    // "unknown" would only show a warning about writing super partitions
+    // that this phone does not have.
+    if !Path::new("/dev/block/by-name/super").exists() {
+        return Ok(SnapshotState::None);
+    }
     if !skyward_block::mount::is_mount_point(Path::new(METADATA))? {
         return Ok(SnapshotState::Unknown);
     }

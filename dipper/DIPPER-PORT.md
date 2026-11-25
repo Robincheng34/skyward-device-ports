@@ -53,9 +53,31 @@ dsp 挂载、AMS haptics 未用、中文界面正常
 无 recovery failed / panic / signal 6
 ```
 
+## 后续修复（2026-11-25）
+
+- **A-only 点"更新"页报错**（`only an A/B phone has an update to merge`）：
+  `pages.rs` 的 Advanced 列表改为按 `cx.info.slot.is_some()` 条件渲染
+  —— A-only 机不显示"更新"入口，A/B 设备不变。
+- **主页误导性提示**：无 super 的机型主页曾显示"读取到更新状态前，
+  暂不刷写 super 中的分区"——`snapshot_state()` 在无 super 时返回
+  `SnapshotState::None` 而不是 `Unknown`，提示消失。
+
+## MTP 调试结论（未攻破，非致命）
+
+dipper 走的是 `configfs=0` 的老式 android_usb 路径（`on fs` 块里挂
+adb/fastboot 端点）。已验证：
+- 手动 `mount -t functionfs mtp /dev/usb-ffs/mtp` **可以成功**（ep0 出现）；
+- 但在 `on fs` 块里加任何 mtp mount 行会让 init 启动失败（设备起不来）；
+- 在 `on property:sys.usb.config=mtp,adb` 分支里挂则因 skyward 在端点
+  不存在时就不会设置该属性而永远不触发（鸡生蛋问题）。
+
+当前镜像**已回退到稳定版**：只在 configfs=1 块保留 `ffs.mtp` function
+声明，不碰启动关键路径。MTP 需更深层方案（如 skyward 自己挂载
+functionfs，或改 init 的 ffs.ready 时序），暂列已知限制。
+
 ## 已知限制（非致命）
 
-- MTP 文件传输不可用（见坑 9）。
+- MTP 文件传输不可用（见上）。
 - keymaster 4 HIDL 在 recovery 下探测不到（解密预期同 lmi 平台墙）。
 - metadata 分区不存在 → 设置不持久化。
 - persist 挂载失败的日志（`/mnt/vendor` 只读导致 mkdir 失败），不影响核心功能。

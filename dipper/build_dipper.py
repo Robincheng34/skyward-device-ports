@@ -126,11 +126,13 @@ def main():
             text = text.replace(
                 "    mkdir /config/usb_gadget/g1/functions/ffs.adb\n",
                 "    mkdir /config/usb_gadget/g1/functions/ffs.adb\n"
-                "    mkdir /config/usb_gadget/g1/functions/ffs.mtp\n"
-                "    mkdir /dev/usb-ffs/mtp 0770 shell system\n"
-                "    mount functionfs mtp /dev/usb-ffs/mtp uid=1024,gid=1024,rmode=0770,fmode=0660,no_disconnect=1\n",
+                "    mkdir /config/usb_gadget/g1/functions/ffs.mtp\n",
                 1,
             )
+            # MTP 端点的挂载只能由 init 在任何服务启动前完成；在 on fs 块
+            # 里加 mount 会让 init 解析失败（设备起不来），因此这里只保留
+            # configfs 的 function 声明，functionfs 挂载交给 mtp,adb 配置
+            # 分支（见下面的 mtp_branch）。
             mtp_branch = (
                 "\non property:sys.usb.config=mtp,adb && property:sys.usb.ffs.ready=1 && property:sys.usb.configfs=1\n"
                 "    mkdir /dev/usb-ffs/mtp 0770 shell system\n"
